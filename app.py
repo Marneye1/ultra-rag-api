@@ -44,24 +44,29 @@ def rag_query():
             model="text-embedding-3-small"
         ).data[0].embedding
 
-# Query Pinecone
-results = index.query(vector=query_embed, top_k=5, include_metadata=True)
-
-# Limit context size per chunk and overall size
-matches = results.matches[:3]  # top 3 most relevant results
+# Query Pinecone (already done before this block)
+results = index.query(vector=query_embed, top_k=2, include_metadata=True)
 
 chunks = []
-total_chars = 0
-max_total = 3500  # GPT-safe limit
+max_total_chars = 2000  # very conservative
+current_total = 0
 
-for match in matches:
-    if match.metadata and "text" in match.metadata:
-        text_chunk = match.metadata["text"][:1000]  # limit per chunk
-        if total_chars + len(text_chunk) <= max_total:
-            chunks.append(text_chunk)
-            total_chars += len(text_chunk)
+for match in results.matches:
+    if not match.metadata:
+        continue
+    text = match.metadata.get("text", "")
+    if not text:
+        continue
+    chunk = text.strip()[:300]  # limit each chunk
+    if current_total + len(chunk) > max_total_chars:
+        break
+    chunks.append(chunk)
+    current_total += len(chunk)
 
 context = "\n\n".join(chunks)
+
+if not context.strip():
+    return jsonify({"answer": "No relevant context found."})
 
 # Optional: fallback message if no usable chunks
 if not context.strip():
