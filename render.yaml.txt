@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: ultra-rag-api
+    env: docker
+    plan: starter
+    autoDeploy: true
