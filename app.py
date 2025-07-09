@@ -13,20 +13,17 @@ if os.environ.get("RENDER") != "true":
     except ImportError:
         print("Skipping .env loading in production")
 
-# Debug print
+# Load API keys
 pinecone_key = os.getenv("PINECONE_API_KEY")
 openai_key = os.getenv("OPENAI_API_KEY")
-print("DEBUG: PINECONE KEY =", pinecone_key)
 
 if not pinecone_key or not openai_key:
-    raise Exception("🔐 API keys are missing. Check your .env file.")
+    raise Exception("🔐 API keys are missing. Check your .env file or Render environment settings.")
 
 # Initialize clients
 client = OpenAI(api_key=openai_key)
 pc = Pinecone(api_key=pinecone_key)
 index = pc.Index("rag-consultant-demo")
-
-print("Available indexes:", pc.list_indexes())
 
 # Create Flask app
 app = Flask(__name__)
@@ -38,40 +35,32 @@ def rag_query():
         if not query:
             return jsonify({"error": "No question provided."}), 400
 
-        # Get embedding
+        # Get embedding from OpenAI
         query_embed = client.embeddings.create(
             input=[query],
             model="text-embedding-3-small"
         ).data[0].embedding
 
-# Query Pinecone (already done before this block)
-results = index.query(vector=query_embed, top_k=2, include_metadata=True)
+        # Query Pinecone index
+        results = index.query(vector=query_embed, top_k=2, include_metadata=True)
 
-chunks = []
-max_total_chars = 2000  # very conservative
-current_total = 0
+        # Build trimmed context
+        chunks = []
+        max_total_chars = 2000
+        current_total = 0
 
-for match in results.matches:
-    if not match.metadata:
-        continue
-    text = match.metadata.get("text", "")
-    if not text:
-        continue
-    chunk = text.strip()[:300]  # limit each chunk
-    if current_total + len(chunk) > max_total_chars:
-        break
-    chunks.append(chunk)
-    current_total += len(chunk)
+        for match in results.matches:
+            if match.metadata and "text" in match.metadata:
+                chunk = match.metadata["text"][:300]
+                if current_total + len(chunk) > max_total_chars:
+                    break
+                chunks.append(chunk)
+                current_total += len(chunk)
 
-context = "\n\n".join(chunks)
+        context = "\n\n".join(chunks)
 
-if not context.strip():
-    return jsonify({"answer": "No relevant context found."})
-
-# Optional: fallback message if no usable chunks
-if not context.strip():
-    return jsonify({"answer": "No relevant context found in the index."})
-
+        if not context.strip():
+            return jsonify({"answer": "No relevant context found in the index."})
 
         # Build GPT prompt
         messages = [
@@ -79,7 +68,7 @@ if not context.strip():
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
         ]
 
-        # Generate response using new SDK
+        # Generate response
         completion = client.chat.completions.create(
             model="gpt-4",
             messages=messages,
@@ -87,6 +76,14 @@ if not context.strip():
         )
 
         answer = completion.choices[0].message.content.strip()
+
+        # Optional: cap final output size
+        if len(answer) > 1500:
+            answer = answer[:1500] + "..."
+
+        # Optional: log sizes
+        print(f"Context chars: {len(context)}, Answer chars: {len(answer)}")
+
         return jsonify({"answer": answer})
 
     except Exception as e:
@@ -97,4 +94,3 @@ if not context.strip():
 # Run server
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
