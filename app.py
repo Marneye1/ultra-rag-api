@@ -2,12 +2,16 @@ import os
 import traceback
 from flask import Flask, request, jsonify
 from openai import OpenAI
-from dotenv import load_dotenv
-from pathlib import Path
 from pinecone import Pinecone
 
-# Load environment variables
-load_dotenv(dotenv_path=Path(".") / ".env")
+# Load .env only if running locally
+if os.environ.get("RENDER") != "true":
+    try:
+        from dotenv import load_dotenv
+        from pathlib import Path
+        load_dotenv(dotenv_path=Path(".") / ".env")
+    except ImportError:
+        print("Skipping .env loading in production")
 
 # Debug print
 pinecone_key = os.getenv("PINECONE_API_KEY")
